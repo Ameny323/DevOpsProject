@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+    environment {
+        DOCKER_IMAGE = "ameni221/springboot-app:latest"
+        KUBE_NAMESPACE = "devops"
+    }
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git(
+                    url: 'https://github.com/Ameny323/DevOpsProject.git',
+                    branch: 'main',
+                    credentialsId: 'github-credentials'
+                )
+            }
+        }
+        stage('Build with Maven') {
+            steps {
+                dir('backend') {
+                    sh 'mvn clean install -DskipTests'
+                }
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                dir('backend') {
+                    withCredentials([string(credentialsId: 'jenkins-sonar', variable: 'SONAR_TOKEN')]) {
+                        sh "mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN"
+                    }
+                }
+            }
+        }
+        stage('CHECK WORKSPACE FILES') {
+            steps {
+                sh '''
+                    echo "Current directory:"
+                    pwd
+                    echo "Files in workspace:"
+                    ls -la
+                '''
+            }
+        }
+        stage('DOCKER BUILD IMAGE') {
+            steps {
+                dir('backend') {
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
+        stage('DOCKER PUSH IMAGE') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
+                        docker push ${DOCKER_IMAGE}
+                    """
+                }
+            }
+        }
+        stage('DEPLOY TO KUBERNETES') {
+            steps {
+                sh """
+                    kubectl apply -f k8s/mysql-deployment.yaml -n ${KUBE_NAMESPACE}
+                    kubectl apply -f k8s/spring-deployment.yaml -n ${KUBE_NAMESPACE}
+                """
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed!"
+        }
+    }
+}
