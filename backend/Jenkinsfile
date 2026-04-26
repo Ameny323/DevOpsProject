@@ -1,15 +1,87 @@
-stage('SonarQube Analysis') {
-    steps {
-        dir('backend') {
-            withCredentials([string(credentialsId: 'jenkins-sonar', variable: 'SONAR_TOKEN')]) {
-                sh """
-                    mvn sonar:sonar \
-                    -Dsonar.login=${SONAR_TOKEN} \
-                    -Dsonar.host.url=https://sonarcloud.io \
-                    -Dsonar.organization=ameny323 \
-                    -Dsonar.projectKey=ameny323_DevOpsProject
-                """
+pipeline {
+    agent any
+    environment {
+        DOCKER_IMAGE = "ameni221/springboot-app:latest"
+        KUBE_NAMESPACE = "devops"
+    }
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git(
+                    url: 'https://github.com/Ameny323/DevOpsProject.git',
+                    branch: 'main',
+                    credentialsId: 'github-credentials'
+                )
             }
+        }
+        stage('Build with Maven') {
+            steps {
+                dir('backend') {
+                    sh 'mvn clean install -DskipTests'
+                }
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                dir('backend') {
+                    withCredentials([string(credentialsId: 'jenkins-sonar', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            mvn sonar:sonar \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.host.url=https://sonarcloud.io \
+                            -Dsonar.organization=ameny323 \
+                            -Dsonar.projectKey=ameny323_DevOpsProject
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Check Workspace') {
+            steps {
+                sh '''
+                    echo "Current directory:"
+                    pwd
+                    echo "Files in workspace:"
+                    ls -la
+                '''
+            }
+        }
+        stage('Docker Build') {
+            steps {
+                dir('backend') {
+                    sh 'docker build -t ameni221/springboot-app:latest .'
+                }
+            }
+        }
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push ameni221/springboot-app:latest
+                    '''
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                    kubectl apply -f k8s/mysql-deployment.yaml -n devops
+                    kubectl apply -f k8s/spring-deployment.yaml -n devops
+                '''
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
