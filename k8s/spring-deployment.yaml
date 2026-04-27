@@ -1,3 +1,10 @@
+# ============================================================
+# Spring Boot — Deployment & Service
+# Namespace: devops
+# Image: ameni221/springboot-app:latest (public on Docker Hub)
+# Accessible at: http://<minikube-ip>:32639/student
+# ============================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,22 +22,39 @@ spec:
     spec:
       containers:
         - name: studentcontainer
+          # Public Docker Hub image — pulled automatically, no build needed
+          # To use your own image: replace with YOUR_USERNAME/YOUR_IMAGE:latest
           image: ameni221/springboot-app:latest
           ports:
             - containerPort: 8089
           env:
+            # Database connection — points to the MySQL service in the same namespace
             - name: SPRING_DATASOURCE_URL
               value: jdbc:mysql://mysql-service:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+
             - name: SPRING_DATASOURCE_USERNAME
               value: root
+
+            # Password is pulled from the Kubernetes secret 'mysql-secret'
+            # Created with: kubectl create secret generic mysql-secret \
+            #               --from-literal=mysql-root-password=root -n devops
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql-secret
                   key: mysql-root-password
+
             - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
               value: com.mysql.cj.jdbc.Driver
+
 ---
+# ============================================================
+# Spring Boot — NodePort Service
+# Exposes the app outside the cluster on port 32639
+# Access: http://<minikube-ip>:32639/student
+# Get minikube IP with: minikube ip
+# ============================================================
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -38,10 +62,10 @@ metadata:
   namespace: devops
 spec:
   selector:
-    app: studentcontainer
+    app: studentcontainer   # Must match the Deployment label above
   ports:
     - protocol: TCP
-      port: 8089
-      targetPort: 8089
-      nodePort: 32639
+      port: 8089        # Internal cluster port
+      targetPort: 8089  # Container port (must match containerPort above)
+      nodePort: 32639   # External port accessible from host machine
   type: NodePort
